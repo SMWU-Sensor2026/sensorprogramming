@@ -110,3 +110,6 @@ body.public-user-active .app{padding-bottom:28px}
 .admin-cabinet-btn small{display:block;margin-top:5px;font-size:11px;line-height:1.5;color:var(--muted)}
 body.admin-detail-active .bottom-nav{display:none}
 body.admin-detail-active .app{padding-bottom:28px}
+
+dialog { border: 0; border-radius: 18px; padding: 24px; width: min(90vw, 400px); }
+dialog::backdrop { background: rgb(0 0 0 / 35%); }
