@@ -1,7 +1,7 @@
 """같은 Wi-Fi에서 시연하는 뽀송연구회 Flask 서버."""
 import os
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash
 from api.routes import api
@@ -17,6 +17,7 @@ def create_app(config=None):
         RESERVATION_TTL_SECONDS=600,
         DEMO_MODE=os.environ.get('DEMO_MODE', '1') == '1',
         MAX_CONTENT_LENGTH=16384,
+        FRONTEND_DIST=str(Path(__file__).resolve().parent / 'frontend' / 'dist'),
         ADMIN_PASSWORD_HASH=generate_password_hash(os.environ['ADMIN_PASSWORD']) if os.environ.get('ADMIN_PASSWORD') else None,
     )
     if config:
@@ -38,7 +39,16 @@ def create_app(config=None):
     @app.get('/')
     @app.get('/admin')
     def index():
-        return render_template('index.html')
+        dist = Path(app.config['FRONTEND_DIST'])
+        if not (dist / 'index.html').is_file():
+            return 'React 화면을 먼저 빌드해주세요: cd frontend && npm ci && npm run build', 503
+        response = send_from_directory(dist, 'index.html')
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+    @app.get('/assets/<path:filename>')
+    def frontend_asset(filename):
+        return send_from_directory(Path(app.config['FRONTEND_DIST']) / 'assets', filename)
 
     return app
 

@@ -59,7 +59,12 @@ class DemoControlsTests(unittest.TestCase):
         return self.client.get('/api/compartments/1').json['data']
 
     def test_demo_admin_opens_without_password(self):
-        self.assertEqual(self.client.get('/admin').status_code, 200)
+        dist = Path(self.temp.name) / 'dist'
+        dist.mkdir()
+        (dist / 'index.html').write_text('<div id="root"></div>')
+        self.app.config['FRONTEND_DIST'] = str(dist)
+        with self.client.get('/admin') as response:
+            self.assertEqual(response.status_code, 200)
         self.assertTrue(self.client.get('/api/config').json['data']['demo_mode'])
         self.assertEqual(self.client.get('/api/admin/events').status_code, 401)
         self.assertEqual(self.client.get('/api/admin/events', headers=self.admin).status_code, 200)

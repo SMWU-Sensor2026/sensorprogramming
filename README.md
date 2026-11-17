@@ -1,13 +1,17 @@
 # 뽀송연구회 스마트 신발장
 
-**Flask를 실행하면 라즈베리파이 없이도 모든 제어 버튼을 시연할 수 있습니다.** 기본은 시연 모드이며 관리자 비밀번호 설정이 필요 없습니다. 웹은 Flask 템플릿으로 제공합니다. 별도 HTML 직접 실행 버전은 없습니다.
+**Flask를 실행하면 라즈베리파이 없이도 모든 제어 버튼을 시연할 수 있습니다.** 기본은 시연 모드이며 관리자 비밀번호 설정이 필요 없습니다. 화면은 React + CSS로 구성하며, Flask가 React 빌드 결과와 API를 함께 제공합니다.
 
 ## 바로 실행
 
-Python 3.11 이상, 프로젝트 폴더에서:
+Python 3.11 이상과 Node.js 20.19+ 또는 22.12+가 필요합니다. 프로젝트 폴더에서:
 
 ```sh
 python -m pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
 python app.py
 ```
 
@@ -18,6 +22,31 @@ macOS/Linux에서 `python`이 없다면 `python3`를 사용합니다. 시스템 
 - 폰 접속: 같은 Wi-Fi에서 `http://노트북또는라즈베리파이IP:5000`을 엽니다. 이 메인 주소를 공통 QR 1개에 넣습니다. `localhost`와 `127.0.0.1`은 폰에서 노트북을 가리키지 않습니다.
 
 서버 터미널을 계속 켜두세요. 방화벽의 5000번 포트와 기기 간 통신이 허용되어야 합니다. 위치 기반 날씨는 localhost/HTTPS에서만 위치 기능을 사용할 수 있어 일반 HTTP LAN 주소에서는 위치 권한이 제한될 수 있습니다.
+
+## 프론트엔드 개발
+
+Flask를 `python app.py`로 실행한 상태에서 다른 터미널에서:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+개발 화면은 http://localhost:5173 에서 열립니다. `/api` 요청은 Vite가 Flask의 5000번 포트로 전달합니다. 프록시는 Host와 Origin을 유지하므로 기존 출처 검증을 사용할 수 있습니다. Flask의 다른 출처 요청 차단은 유지합니다.
+
+배포·휴대폰 시연은 `npm run build` 후 기존 Flask 주소(5000번 포트)를 사용합니다. 프론트 수정 후에는 다시 빌드하세요. Node.js는 프론트 개발·빌드에만 필요하고, 빌드 결과 `frontend/dist`가 있으면 실행 장치에서는 Python만 필요합니다. 빌드가 없으면 화면은 빌드 안내와 HTTP 503을 반환하며 API는 계속 동작합니다.
+
+```text
+frontend/src/
+  pages/          # 홈, 칸 목록·상세, 공공장소 인증, 관리자, 설정
+  components/     # 신발장 카드·목록, 날씨, 관리자 로그인
+  api/client.js   # API 호출·인증 헤더·오류 처리
+  useCabinet.js   # 상태 조회, 예약·인증, 제어, 주기적 갱신
+  styles/         # 기존 디자인을 유지한 CSS
+```
+
+센서 제어·권한 검증·DB는 기존 Python 코드가 담당합니다. 비밀번호는 브라우저에 저장하지 않으며, 사용자 토큰만 기존처럼 sessionStorage에 저장합니다. 관리자 토큰은 메모리에만 유지합니다.
 
 ## 버튼 시연
 
@@ -93,7 +122,9 @@ python app.py
 
 ```sh
 python -m unittest discover -s tests -v
-node --check static/js/script.js
+cd frontend
+npm ci
+npm run build
 ```
 
 테스트는 임시 DB를 사용합니다. 비밀번호·토큰·동시 중복 예약·정상/실패 출고·관리자 제한 외에 비밀번호 없는 시연 관리자, 문·팬·입출고 버튼, 건조 기록, 드라이버 자동 선택과 실제 관측 구분을 검증합니다.
