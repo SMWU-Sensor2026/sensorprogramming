@@ -3,6 +3,7 @@ let demo=[], mode='home', selected=1, publicSelected=1, publicUnlocked=null;
 let currentPage='home', adminDetailView=false, adminReturnPage='home', toastTimer;
 let adminToken=null, refreshBusy=false, renderedMode=null, demoMode=false, hardwareMode='MOCK', adminOpening=false;
 let pendingRefresh=null;
+let adminAuthEpoch=0, loggingOut=false;
 let userAccess=null;
 try { userAccess=JSON.parse(sessionStorage.getItem('bbosong_access')||'null'); } catch { /* 재인증 가능 */ }
 const params=new URLSearchParams(location.search);
@@ -56,7 +57,7 @@ function navigate(page){
   if(page==='detail')renderDetail();
   if(page==='public-password')renderPublicPassword();
   if(page==='public-start')renderPublicSlots();
-  window.scrollTo({top:0,behavior:'instant'});
+  window.scrollTo({left:0,top:0,behavior:'instant'});
 }
 function render(){
   $('demo-banner').classList.toggle('hidden',!demoMode);
@@ -157,14 +158,14 @@ async function endPublicSession(){
   }catch(error){showToast(error.message)}finally{button.disabled=false}
 }
 async function openPrototypeAdmin(){
-  if(adminOpening)return;
+  if(adminOpening||loggingOut)return;
   if(adminToken){await refreshState();navigate('admin');return;}
   adminOpening=true;adminReturnPage=currentPage;
   try{
     const config=await api('/config');demoMode=config.demo_mode;hardwareMode=config.hardware_mode;
     if(demoMode){
       const result=await api('/admin/login',{method:'POST',data:{}});
-      adminToken=result.access_token;await refreshState();navigate('admin');
+      adminAuthEpoch++;adminToken=result.access_token;await refreshState();navigate('admin');
     }else{$('admin-login-message').textContent='';$('admin-login').showModal();$('admin-password').focus();}
   }catch(error){showToast(error.message)}finally{adminOpening=false}
 }
@@ -172,12 +173,36 @@ async function loginAdmin(event){
   event.preventDefault();const button=$('admin-login-submit');button.disabled=true;
   try{
     const result=await api('/admin/login',{method:'POST',data:{password:$('admin-password').value}});
-    adminToken=result.access_token;$('admin-login').close();await refreshState();navigate('admin');
+    adminAuthEpoch++;adminToken=result.access_token;$('admin-login').close();await refreshState();navigate('admin');
   }catch(error){$('admin-login-message').textContent=error.message}finally{$('admin-password').value='';button.disabled=false}
 }
 async function logoutAdmin(){
-  try{await api('/admin/logout',{method:'POST',token:adminToken})}catch(error){showToast(error.message)}
-  adminToken=null;adminDetailView=false;navigate(mode==='public'?'public-start':'home');await refreshState();
+  if(loggingOut)return;
+  loggingOut=true;
+  const token=adminToken;
+  adminAuthEpoch++;
+  adminToken=null;adminDetailView=false;
+  $('admin-login').close();$('admin-password').value='';
+  $('admin-cabinet-grid').replaceChildren();
+  $('history-content').replaceChildren();$('drying-history-content').replaceChildren();
+  $('admin-history-panel').classList.add('hidden');
+  $('admin-history-toggle').setAttribute('aria-expanded','false');
+  $('admin-history-toggle').textContent='이용 기록 보기';
+  $('drying-history-content').classList.add('hidden');
+  demo=[];
+  const url=new URL(location.href);url.searchParams.delete('admin');
+  if(url.pathname==='/admin')url.pathname='/';
+  window.history.replaceState(null,'',url.pathname+url.search+url.hash);
+  navigate(mode==='public'?'public-start':'home');render();
+  showToast('관리자 화면에서 로그아웃했어요.');
+  try{
+    if(token)await api('/admin/logout',{method:'POST',token});
+  }catch(error){
+    if(error.status!==401)showToast('이 화면에서는 로그아웃했어요. 서버 권한 해제는 연결 후 다시 확인해주세요.');
+  }finally{
+    loggingOut=false;
+    await refreshState();
+  }
 }
 function backFromAdmin(){adminDetailView=false;navigate(mode==='public'?'public-start':'home')}
 async function saveMode(){
@@ -251,9 +276,11 @@ async function loadDryingHistory(){
 async function copyQrLinks(){try{await navigator.clipboard.writeText(location.origin+'/');showToast('공통 QR 주소가 복사됐어요.')}catch{$('qr-address').textContent=location.origin+'/';showToast('표시된 주소를 복사해주세요.')}}
 async function refreshState(initial=false){
   if(refreshBusy){await pendingRefresh;return refreshState(initial);}
+  const authEpoch=adminAuthEpoch;
   refreshBusy=true;pendingRefresh=new Promise(resolve=>{refreshState.release=resolve;});
   try{
     const cabinet=await api('/cabinets/1');
+    if(authEpoch!==adminAuthEpoch)return;
     demoMode=cabinet.demo_mode;hardwareMode=cabinet.hardware_mode;
     const nextMode=cabinet.mode==='PUBLIC'?'public':'home';
     if(nextMode!==mode){publicUnlocked=null;adminDetailView=false;if(!initial&&currentPage!=='admin')navigate(nextMode==='public'?'public-start':'home');}
@@ -261,8 +288,9 @@ async function refreshState(initial=false){
     let states=await api('/compartments');
     if(adminToken){
       try{states=await api('/admin/compartments',{token:adminToken})}
-      catch(error){if(error.status===401||error.status===403){adminToken=null;adminDetailView=false;if(currentPage==='admin'||currentPage==='detail')navigate(mode==='public'?'public-start':'home');}else throw error;}
+      catch(error){if(authEpoch!==adminAuthEpoch)return;if(error.status===401||error.status===403){adminToken=null;adminDetailView=false;if(currentPage==='admin'||currentPage==='detail')navigate(mode==='public'?'public-start':'home');}else throw error;}
     }
+    if(authEpoch!==adminAuthEpoch)return;
     demo=states.map(adapt);
     if(mode==='public'&&userAccess){
       try{
@@ -276,11 +304,13 @@ async function refreshState(initial=false){
         else throw error;
       }
     }
+    if(authEpoch!==adminAuthEpoch)return;
     render();$('server-status').textContent=hardwareMode==='MOCK'?'서버 연결됨 · 센서 시연 모드':'서버 연결됨 · 장치 데이터';
     $('public-server-status').textContent=$('server-status').textContent;
     if(initial){if(params.get('admin')==='1'||location.pathname==='/admin'){setTimeout(openPrototypeAdmin,0);return;}else if(mode==='public')navigate('public-start');else if(qrCabinet){renderQrLanding();navigate('qr')}else navigate('home');}
     else if(currentPage==='detail')renderDetail();
   }catch(error){
+    if(authEpoch!==adminAuthEpoch)return;
     const message='서버 연결 실패 · 상태를 불러오지 못했어요. 잠시 후 재시도합니다.';
     $('server-status').textContent=message;$('public-server-status').textContent=message;
     if(currentPage==='detail'){adminDetailView=false;navigate(mode==='public'?'public-start':'home');}
