@@ -22,6 +22,14 @@ def init_db(app):
     Path(app.config['DATABASE']).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(app.config['DATABASE']) as db:
         db.executescript(Path(__file__).with_name('schema.sql').read_text())
+        columns = {row[1] for row in db.execute('PRAGMA table_info(compartment)')}
+        for name, definition in {
+            'temperature': 'REAL DEFAULT 24', 'humidity': 'REAL DEFAULT 44',
+            'circulation_fan_status': "TEXT NOT NULL DEFAULT 'OFF'",
+            'exhaust_fan_status': "TEXT NOT NULL DEFAULT 'OFF'"
+        }.items():
+            if name not in columns:
+                db.execute(f'ALTER TABLE compartment ADD COLUMN {name} {definition}')
         for slot in (1, 2):
             db.execute('INSERT OR IGNORE INTO compartment(compartment_id,updated_at) VALUES (?,?)', (slot, now()))
 

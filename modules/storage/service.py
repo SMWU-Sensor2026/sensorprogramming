@@ -168,15 +168,22 @@ def get_session(session_id):
     return row
 
 
-def checkout(session_id):
-    row = get_session(session_id)
+def checkout(session_id, as_admin=False):
+    if as_admin:
+        authorize(admin=True)
+        row = get_db().execute('SELECT * FROM storage_session WHERE session_id=?', (session_id,)).fetchone()
+        if not row:
+            fail('NOT_FOUND', '보관 세션을 찾을 수 없습니다.', 404)
+    else:
+        row = get_session(session_id)
     if row['session_status'] != SessionStatus.ACTIVE:
         fail('CONFLICT', '입고 확인 후 출고할 수 있습니다.', 409)
     if slot(row['compartment_id'])['door_status'] == DoorStatus.ERROR:
         fail('DOOR_ERROR', '문 제어 오류입니다. 세션을 유지합니다.', 409)
     if not row['checkout_requested_at']:
         get_db().execute('UPDATE storage_session SET checkout_requested_at=?,checkout_open_confirmed=0 WHERE session_id=?', (now(), session_id))
-        get_db().execute("UPDATE compartment SET door_status='MOVING',updated_at=? WHERE compartment_id=?", (now(), row['compartment_id']))
+    from modules.controls import command_door
+    command_door(row['compartment_id'], 'OPEN')
     # A command is never treated as physical door-open/removal confirmation.
     return public_session(get_db().execute('SELECT * FROM storage_session WHERE session_id=?', (session_id,)).fetchone())
 
@@ -190,9 +197,7 @@ def cancel(session_id):
     return {'session_status': SessionStatus.CANCELLED}
 
 
-def mock_observation(slot_id, data):
-    if not current_app.config['MOCK_MODE']:
-        fail('FORBIDDEN', 'Mock 모드에서만 사용할 수 있습니다.', 403)
+def observe(slot_id, data):
     expire()
     old = slot(slot_id)
     shoe = data.get('shoe_status', old['shoe_status'])
@@ -200,6 +205,9 @@ def mock_observation(slot_id, data):
     if shoe not in list(ShoeStatus) or door not in list(DoorStatus):
         fail('INVALID_REQUEST', '잘못된 센서 상태입니다.')
     row = live(slot_id)
+    if not row and mode() == CabinetMode.HOME and shoe == ShoeStatus.OCCUPIED and old['shoe_status'] != ShoeStatus.OCCUPIED:
+        session_id = get_db().execute("INSERT INTO storage_session (cabinet_id,compartment_id,session_status,reserved_at,started_at,reservation_expires_at) VALUES (1,?,'ACTIVE',?,?,?)", (slot_id, now(), now(), later(600))).lastrowid
+        row = live(slot_id)
     # Confirmations must be observed in order: requested -> OPEN -> EMPTY.
     if shoe != old['shoe_status'] and shoe == ShoeStatus.OCCUPIED:
         event('SHOE_IN', slot_id, row['session_id'] if row else None)
@@ -208,10 +216,16 @@ def mock_observation(slot_id, data):
     if row and row['checkout_requested_at'] and door == DoorStatus.OPEN:
         get_db().execute('UPDATE storage_session SET checkout_open_confirmed=1 WHERE session_id=?', (row['session_id'],))
     if shoe != old['shoe_status'] and shoe == ShoeStatus.EMPTY:
-        normal = row and row['checkout_requested_at'] and door != DoorStatus.ERROR and (row['checkout_open_confirmed'] or door == DoorStatus.OPEN)
+        normal = row and door != DoorStatus.ERROR and ((row['checkout_requested_at'] and (row['checkout_open_confirmed'] or door == DoorStatus.OPEN)) or (mode() == CabinetMode.HOME and door == DoorStatus.OPEN))
         event('SHOE_OUT' if normal or mode() == CabinetMode.HOME else 'UNEXPECTED_REMOVAL', slot_id, row['session_id'] if row else None)
         if normal:
             get_db().execute("UPDATE storage_session SET session_status='COMPLETED',ended_at=? WHERE session_id=?", (now(), row['session_id']))
             revoke(row['session_id'])
     get_db().execute('UPDATE compartment SET shoe_status=?,door_status=?,updated_at=? WHERE compartment_id=?', (shoe, door, now(), slot_id))
-    return {'mock': True, 'compartment_id': slot_id}
+    return {'mock': current_app.config['MOCK_MODE'], 'compartment_id': slot_id}
+
+
+def mock_observation(slot_id, data):
+    if not current_app.config['MOCK_MODE']:
+        fail('FORBIDDEN', 'Mock 모드에서만 사용할 수 있습니다.', 403)
+    return observe(slot_id, data)

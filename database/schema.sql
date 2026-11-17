@@ -29,3 +29,10 @@ CREATE TABLE IF NOT EXISTS shoe_event (
  event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL, cabinet_id INTEGER NOT NULL,
  compartment_id INTEGER, session_id INTEGER, occurred_at TEXT NOT NULL, details TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS drying_session (
+ drying_id INTEGER PRIMARY KEY, compartment_id INTEGER NOT NULL REFERENCES compartment,
+ session_id INTEGER REFERENCES storage_session, started_at TEXT NOT NULL, ended_at TEXT,
+ initial_temperature REAL, initial_humidity REAL, final_humidity REAL,
+ external_humidity REAL, duration_seconds INTEGER, result TEXT NOT NULL
+);
