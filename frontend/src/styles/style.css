@@ -1040,3 +1040,10 @@ dialog::backdrop {
   background: #fffaf2;
   cursor: pointer;
 }
+
+/* Keep the content center fixed when switching between long and short pages. */
+html { overflow-y: scroll; scrollbar-gutter: stable; overflow-x: clip; }
+body { overflow-x: clip; }
+.admin-page-footer { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
+.admin-page-footer .button { margin-top: 0; }
+#history-content, #drying-history-content, #qr-address { overflow-wrap: anywhere; }

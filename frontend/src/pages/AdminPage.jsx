@@ -8,13 +8,6 @@ export default function AdminPage({ s }) {
       className={"page" + (s.page === "admin" ? " active" : "")}
     >
       <button
-        className="button secondary"
-        onClick={() => s.logoutAdmin()}
-        disabled={s.busy}
-      >
-        관리자 로그아웃
-      </button>
-      <button
         className="back"
         onClick={() =>
           s.navigate(s.mode === "public" ? "public-start" : "home")
@@ -202,6 +195,16 @@ export default function AdminPage({ s }) {
           </div>
         </div>
       </div>
+      <footer className="admin-page-footer">
+      <button
+        id="admin-logout-button"
+        className="button secondary"
+        onClick={() => s.logoutAdmin()}
+        disabled={s.busy}
+      >
+        관리자 로그아웃
+      </button>
+      </footer>
     </section>
   );
 }
