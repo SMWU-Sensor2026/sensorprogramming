@@ -43,12 +43,36 @@ class ServerTests(unittest.TestCase):
             return result.fetchall()
 
     def test_page_and_assets(self):
-        page = self.client.get('/')
-        self.assertEqual(page.status_code, 200)
-        for path in ('/static/css/style.css', '/static/js/script.js', '/static/js/weather.js'):
-            self.assertIn(path.encode(), page.data)
-            with self.client.get(path) as response:
-                self.assertEqual(response.status_code, 200)
+        dist = Path(self.temp.name) / 'dist'
+        (dist / 'assets').mkdir(parents=True)
+        (dist / 'index.html').write_text('<div id="root"></div><script src="/assets/app.js"></script>')
+        (dist / 'assets' / 'app.js').write_text('/* React bundle */')
+        self.app.config['FRONTEND_DIST'] = str(dist)
+        for path in ('/', '/admin', '/?cabinet=2', '/?admin=1'):
+            with self.client.get(path) as page:
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'/assets/app.js', page.data)
+                self.assertEqual(page.headers['Cache-Control'], 'no-cache')
+        with self.client.get('/assets/app.js') as asset:
+            self.assertEqual(asset.status_code, 200)
+        self.assertEqual(self.client.get('/assets/missing.js').status_code, 404)
+        self.assertEqual(self.client.get('/assets/../index.html').status_code, 404)
+
+    def test_frontend_missing_build_has_setup_message(self):
+        self.app.config['FRONTEND_DIST'] = str(Path(self.temp.name) / 'missing')
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 503)
+        self.assertIn(b'npm run build', response.data)
+        self.assertEqual(self.client.get('/api/cabinets/1').status_code, 200)
+
+    def test_legacy_drying_table_migrates_without_losing_records(self):
+        with sqlite3.connect(self.db_path) as db:
+            db.execute('ALTER TABLE drying_session DROP COLUMN initial_temperature')
+            db.execute("INSERT INTO drying_session(compartment_id,started_at,result) VALUES (1,'2026-11-17','IDLE')")
+        create_app({'TESTING': True, 'DATABASE': self.db_path})
+        with sqlite3.connect(self.db_path) as db:
+            self.assertIn('initial_temperature', {row[1] for row in db.execute('PRAGMA table_info(drying_session)')})
+            self.assertEqual(db.execute('SELECT result FROM drying_session').fetchone()[0], 'IDLE')
 
     def test_public_summary_hides_sensor_details(self):
         self.public_mode()

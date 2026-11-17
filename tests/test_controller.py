@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from controller import CabinetState
+from modules.drying.controller import CabinetState
 
 class ControllerTests(unittest.TestCase):
     def test_start_and_stop(self):

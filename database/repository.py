@@ -30,6 +30,9 @@ def init_db(app):
         }.items():
             if name not in columns:
                 db.execute(f'ALTER TABLE compartment ADD COLUMN {name} {definition}')
+        drying_columns = {row[1] for row in db.execute('PRAGMA table_info(drying_session)')}
+        if 'initial_temperature' not in drying_columns:
+            db.execute('ALTER TABLE drying_session ADD COLUMN initial_temperature REAL')
         for slot in (1, 2):
             db.execute('INSERT OR IGNORE INTO compartment(compartment_id,updated_at) VALUES (?,?)', (slot, now()))
 

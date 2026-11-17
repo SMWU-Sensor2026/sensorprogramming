@@ -78,6 +78,6 @@ CREATE TABLE IF NOT EXISTS drying_session (
   compartment_id INTEGER NOT NULL REFERENCES compartment(compartment_id),
   session_id INTEGER REFERENCES storage_session(session_id),
   started_at TEXT NOT NULL, ended_at TEXT,
-  initial_humidity REAL, final_humidity REAL,
+  initial_temperature REAL, initial_humidity REAL, final_humidity REAL,
   duration_seconds INTEGER, result TEXT
 );
