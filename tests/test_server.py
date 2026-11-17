@@ -16,7 +16,7 @@ class ServerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.db_path = str(Path(self.temp.name) / 'test.db')
-        self.app = create_app({'TESTING': True, 'DATABASE': self.db_path, 'ADMIN_PASSWORD_HASH': self.admin_hash})
+        self.app = create_app({'TESTING': True, 'DATABASE': self.db_path, 'ADMIN_PASSWORD_HASH': self.admin_hash, 'DEMO_MODE': False, 'MOCK_AUTO_CONFIRM': False})
         self.client = self.app.test_client()
         self.admin = self.client.post('/api/admin/login', json={'password': 'admin-test-password'}).json['data']['access_token']
 

@@ -6,6 +6,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash
 from api.routes import api
 from database.repository import init_db
+from hardware.backend import load_driver
 
 
 def create_app(config=None):
@@ -14,12 +15,16 @@ def create_app(config=None):
         DATABASE=str(Path(app.instance_path) / 'bbosong.db'),
         TOKEN_TTL_SECONDS=1800,
         RESERVATION_TTL_SECONDS=600,
-        MOCK_MODE=True,
+        DEMO_MODE=os.environ.get('DEMO_MODE', '1') == '1',
         MAX_CONTENT_LENGTH=16384,
         ADMIN_PASSWORD_HASH=generate_password_hash(os.environ['ADMIN_PASSWORD']) if os.environ.get('ADMIN_PASSWORD') else None,
     )
     if config:
         app.config.update(config)
+    app.extensions['hardware'] = app.config.get('HARDWARE_DRIVER') or load_driver()
+    app.config['MOCK_MODE'] = app.extensions['hardware'].is_mock
+    if not app.config['MOCK_MODE']:
+        app.config['DEMO_MODE'] = False
     app.json.ensure_ascii = False
     init_db(app)
     app.register_blueprint(api, url_prefix='/api')
@@ -31,6 +36,7 @@ def create_app(config=None):
         return error
 
     @app.get('/')
+    @app.get('/admin')
     def index():
         return render_template('index.html')
 

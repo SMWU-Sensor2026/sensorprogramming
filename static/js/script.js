@@ -1,7 +1,8 @@
 // 상태와 권한은 Flask 서버가 검증합니다. 브라우저에는 비밀번호를 저장하지 않습니다.
 let demo=[], mode='home', selected=1, publicSelected=1, publicUnlocked=null;
 let currentPage='home', adminDetailView=false, adminReturnPage='home', toastTimer;
-let adminToken=null, refreshBusy=false, renderedMode=null;
+let adminToken=null, refreshBusy=false, renderedMode=null, demoMode=false, hardwareMode='MOCK', adminOpening=false;
+let pendingRefresh=null;
 let userAccess=null;
 try { userAccess=JSON.parse(sessionStorage.getItem('bbosong_access')||'null'); } catch { /* 재인증 가능 */ }
 const params=new URLSearchParams(location.search);
@@ -58,6 +59,13 @@ function navigate(page){
   window.scrollTo({top:0,behavior:'instant'});
 }
 function render(){
+  $('demo-banner').classList.toggle('hidden',!demoMode);
+  $('demo-reset-card').classList.toggle('hidden',!demoMode);
+  $('hardware-badge').textContent=hardwareMode==='MOCK'?'장치 없이 시연 중':'장치 연결 모드';
+  $('hardware-note').textContent=hardwareMode==='MOCK'?'실제 장치 없이 문과 팬 상태를 시연합니다.':'연결된 장치의 센서 상태를 확인합니다.';
+  $('public-auth-note').textContent=hardwareMode==='MOCK'?'비밀번호는 서버에서 관리합니다. 예약 후 문을 열고 입출고 시연 버튼을 사용하세요.':'비밀번호는 서버에서 관리합니다. 예약 후 문을 열고 신발을 넣어주세요.';
+  $('admin-access-note').textContent=demoMode?'시연 모드에서는 비밀번호 없이 관리자 화면을 열 수 있어요.':'관리자 비밀번호로 인증 후 접속할 수 있어요.';
+  document.querySelectorAll('.sensor-source').forEach(el=>el.textContent=hardwareMode==='MOCK'?'시연 센서값':'센서 측정값');
   $('home-mode-label').textContent=mode==='home'?'가정용 모드':'공공장소용 모드';
   $('current-mode-badge').textContent=mode==='home'?'가정용':'공공장소용';
   $('mode-description').textContent=mode==='home'?'로그인 없이 상태를 확인할 수 있어요.':'비밀번호로 해당 칸만 이용할 수 있어요.';
@@ -95,12 +103,14 @@ function renderDetail(){
   $('detail-shoes').textContent=c.shoe_status==='UNKNOWN'?'불확실':c.occupied?'있음':'없음';
   $('detail-estimate').textContent=dryingEstimate(c);$('detail-estimate-note').textContent='건조 이력이 부족해 예상 시간을 제공할 수 없습니다.';
   $('detail-back').textContent=adminDetailView?'← 관리자 페이지':mode==='public'?'← 칸 선택':'← 신발장 목록';
-  $('detail-access-note').textContent='Mock 센서 데이터입니다. 실제 문은 움직이지 않습니다.'+(userAccess?.session?.session_status==='RESERVED'?' 예약 완료 · 입고 확인 대기 중입니다.':'');
+  $('detail-access-note').textContent=(hardwareMode==='MOCK'?'시연 모드 · 문과 팬 상태를 화면에서 확인할 수 있어요.':'장치 제어 모드 · 센서가 실제 상태를 확인합니다.')+(c.session?.session_status==='RESERVED'?' 예약 완료 · 문을 열고 신발을 넣어주세요.':'');
+  $('demo-detail-controls').classList.toggle('hidden',!demoMode);
   const userPublic=mode==='public'&&!adminDetailView;
   $('public-end-button').classList.toggle('hidden',!userPublic);
   $('public-end-button').textContent=userAccess?.session?.session_status==='RESERVED'?'입고 전 예약 취소':'출고 요청';
   $('public-lock-button').classList.toggle('hidden',!userPublic);
-  $('door-button').disabled=true;
+  $('door-button').disabled=false;
+  $('close-door-button').disabled=false;
 }
 function renderPublicSlots(){
   const labels={AVAILABLE:'이용 가능',RESERVED:'예약 중',IN_USE:'이용 중',UNAVAILABLE:'이용 불가'};
@@ -146,7 +156,18 @@ async function endPublicSession(){
     await refreshState();
   }catch(error){showToast(error.message)}finally{button.disabled=false}
 }
-function openPrototypeAdmin(){adminReturnPage=currentPage;$('admin-login-message').textContent='';$('admin-login').showModal();$('admin-password').focus()}
+async function openPrototypeAdmin(){
+  if(adminOpening)return;
+  if(adminToken){await refreshState();navigate('admin');return;}
+  adminOpening=true;adminReturnPage=currentPage;
+  try{
+    const config=await api('/config');demoMode=config.demo_mode;hardwareMode=config.hardware_mode;
+    if(demoMode){
+      const result=await api('/admin/login',{method:'POST',data:{}});
+      adminToken=result.access_token;await refreshState();navigate('admin');
+    }else{$('admin-login-message').textContent='';$('admin-login').showModal();$('admin-password').focus();}
+  }catch(error){showToast(error.message)}finally{adminOpening=false}
+}
 async function loginAdmin(event){
   event.preventDefault();const button=$('admin-login-submit');button.disabled=true;
   try{
@@ -167,15 +188,16 @@ async function saveMode(){
   }catch(error){showToast(error.message)}
 }
 function renderAdminCabinets(){
-  $('admin-cabinet-grid').innerHTML=adminToken?demo.map(c=>`<div class="card mt-14"><button class="admin-cabinet-btn" onclick="openAdminCabinet(${c.id})"><strong>${c.id}번 칸 · ${c.shoe_status||'—'} · ${c.door_status||'—'}</strong><span>›</span></button><p class="tiny-note">Mock 센서 입력 (실제 장치 제어 아님)</p><div class="row"><button onclick="mockObserve(${c.id},'OCCUPIED')">입고 감지</button><button onclick="mockObserve(${c.id},null,'OPEN')">문 열림 확인</button><button onclick="mockObserve(${c.id},'EMPTY')">반출 감지</button><button onclick="mockObserve(${c.id},null,'CLOSED')">문 닫힘</button><button onclick="mockObserve(${c.id},null,'ERROR')">문 오류</button></div></div>`).join(''):'';
+  $('admin-cabinet-grid').innerHTML=adminToken?demo.map(c=>`<div class="card mt-14"><button class="admin-cabinet-btn" onclick="openAdminCabinet(${c.id})"><strong>${c.id}번 칸 · ${c.shoe_status||'—'} · ${c.door_status||'—'}</strong><span>›</span></button><div class="row"><button onclick="adminDoor(${c.id},'OPEN')">문 열기</button><button onclick="adminDoor(${c.id},'CLOSED')">문 닫기</button><button onclick="adminFans(${c.id},true)">팬 시작</button><button onclick="adminFans(${c.id},false)">팬 정지</button></div>${hardwareMode==='MOCK'?`<p class="tiny-note">센서 상태 시연</p><div class="row"><button onclick="mockObserve(${c.id},'OCCUPIED')">입고 감지</button><button onclick="mockObserve(${c.id},null,'OPEN')">문 열림 확인</button><button onclick="mockObserve(${c.id},'EMPTY')">반출 감지</button><button onclick="mockObserve(${c.id},null,'CLOSED')">문 닫힘</button><button onclick="mockObserve(${c.id},null,'ERROR')">문 오류</button></div>`:''}</div>`).join(''):'';
 }
 function openAdminCabinet(id){if(!adminToken)return;selected=id;adminDetailView=true;navigate('detail')}
 async function mockObserve(id,shoe,door){
-  try{await api('/admin/mock/compartments/'+id,{method:'POST',data:{...(shoe?{shoe_status:shoe}:{}),...(door?{door_status:door}:{})},token:adminToken});await refreshState();showToast('Mock 센서 상태를 반영했어요.');}catch(error){showToast(error.message)}
+  try{await api('/admin/mock/compartments/'+id,{method:'POST',data:{...(shoe?{shoe_status:shoe,humidity:shoe==='OCCUPIED'?65:44}:{}),...(door?{door_status:door}:{})},token:adminToken});await refreshState();showToast('Mock 센서 상태를 반영했어요.');}catch(error){showToast(error.message)}
 }
 async function toggleAdminHistory(){
   const panel=$('admin-history-panel');panel.classList.toggle('hidden');
   $('admin-history-toggle').setAttribute('aria-expanded',String(!panel.classList.contains('hidden')));
+  $('admin-history-toggle').textContent=panel.classList.contains('hidden')?'이용 기록 보기':'이용 기록 접기';
   if(panel.classList.contains('hidden'))return;
   try{
     const events=await api('/admin/events',{token:adminToken});$('history-content').replaceChildren();
@@ -184,14 +206,55 @@ async function toggleAdminHistory(){
   }catch(error){$('history-content').textContent=error.message}
 }
 function toggleNoQrChoices(){const el=$('no-qr-choices');el.classList.toggle('hidden');$('no-qr-button').setAttribute('aria-expanded',String(!el.classList.contains('hidden')))}
-function previewPublicStart(){if(mode!=='public'){showToast('먼저 공공장소용 모드로 변경해주세요.');return;}navigate('public-start')}
+async function previewPublicStart(){
+  if(mode!=='public'){
+    try{await api('/admin/cabinet/mode',{method:'PATCH',data:{mode:'PUBLIC'},token:adminToken});storeAccess(null);publicUnlocked=null;await refreshState();}
+    catch(error){showToast(error.message);return;}
+  }
+  adminDetailView=false;navigate('public-start');
+}
 function previewCabinet(id){currentPage==='admin'?openAdminCabinet(id):openCabinet(id)}
-function mockOpenDoor(){showToast('실제 문 제어 장치는 연결되지 않았어요.')}
+function detailToken(){return adminDetailView?adminToken:userAccess?.access_token}
+async function runControl(path,data,token,message){
+  try{await api(path,{method:'POST',data,token});await refreshState();showToast(message);return true;}
+  catch(error){showToast(error.message);return false;}
+}
+async function controlDoor(target){
+  const button=$(target==='OPEN'?'door-button':'close-door-button');button.disabled=true;
+  try{await runControl('/compartments/'+selected+'/door',{door_status:target},detailToken(),hardwareMode==='MOCK'?'시연: 문 상태를 변경했어요.':'문 명령을 전달했어요. 센서 확인을 기다립니다.');}
+  finally{button.disabled=false}
+}
+async function controlFans(enabled){
+  const button=$(enabled?'fan-on-button':'fan-off-button');button.disabled=true;
+  try{await runControl('/compartments/'+selected+'/fans',{enabled},detailToken(),enabled?'팬 시작을 요청했어요.':'팬 정지를 요청했어요.');}
+  finally{button.disabled=false}
+}
+async function simulateShoe(shoe){
+  const button=$(shoe==='OCCUPIED'?'demo-insert':'demo-remove');button.disabled=true;
+  try{await runControl('/compartments/'+selected+'/simulate',{shoe_status:shoe,humidity:shoe==='OCCUPIED'?65:44},detailToken(),shoe==='OCCUPIED'?'시연: 신발을 넣었어요.':'시연: 신발을 꺼냈어요.');}
+  finally{button.disabled=false}
+}
+async function adminDoor(id,target){await runControl('/compartments/'+id+'/door',{door_status:target},adminToken,'문 상태를 확인해주세요.')}
+async function adminFans(id,enabled){await runControl('/compartments/'+id+'/fans',{enabled},adminToken,'팬 상태를 확인해주세요.')}
+async function resetDemo(){
+  if(!confirm('현재 시연 중인 보관 세션과 칸 상태를 초기화할까요? 기록은 유지됩니다.'))return;
+  if(await runControl('/admin/demo/reset',{},adminToken,'시연 상태를 초기화했어요.')){storeAccess(null);publicUnlocked=null;}
+}
+async function loadDryingHistory(){
+  const panel=$('drying-history-content');panel.classList.remove('hidden');panel.replaceChildren();
+  try{
+    const rows=await api('/admin/drying-sessions',{token:adminToken});
+    if(!rows.length)panel.textContent='아직 건조 기록이 없어요. 팬을 시작해보세요.';
+    for(const row of rows){const p=document.createElement('p');p.textContent=`${row.compartment_id}번 칸 · ${row.started_at} · ${row.result} · ${row.duration_seconds??'진행 중'}${row.duration_seconds===null?'':'초'}`;panel.append(p);}
+  }catch(error){panel.textContent=error.message}
+}
 async function copyQrLinks(){try{await navigator.clipboard.writeText(location.origin+'/');showToast('공통 QR 주소가 복사됐어요.')}catch{$('qr-address').textContent=location.origin+'/';showToast('표시된 주소를 복사해주세요.')}}
 async function refreshState(initial=false){
-  if(refreshBusy)return;refreshBusy=true;
+  if(refreshBusy){await pendingRefresh;return refreshState(initial);}
+  refreshBusy=true;pendingRefresh=new Promise(resolve=>{refreshState.release=resolve;});
   try{
     const cabinet=await api('/cabinets/1');
+    demoMode=cabinet.demo_mode;hardwareMode=cabinet.hardware_mode;
     const nextMode=cabinet.mode==='PUBLIC'?'public':'home';
     if(nextMode!==mode){publicUnlocked=null;adminDetailView=false;if(!initial&&currentPage!=='admin')navigate(nextMode==='public'?'public-start':'home');}
     mode=nextMode;
@@ -213,16 +276,16 @@ async function refreshState(initial=false){
         else throw error;
       }
     }
-    render();$('server-status').textContent='서버 연결됨 · Mock 센서 데이터';
-    $('public-server-status').textContent='서버 연결됨 · 센서 시연 모드';
-    if(initial){if(mode==='public')navigate('public-start');else if(qrCabinet){renderQrLanding();navigate('qr')}else navigate('home');}
+    render();$('server-status').textContent=hardwareMode==='MOCK'?'서버 연결됨 · 센서 시연 모드':'서버 연결됨 · 장치 데이터';
+    $('public-server-status').textContent=$('server-status').textContent;
+    if(initial){if(params.get('admin')==='1'||location.pathname==='/admin'){setTimeout(openPrototypeAdmin,0);return;}else if(mode==='public')navigate('public-start');else if(qrCabinet){renderQrLanding();navigate('qr')}else navigate('home');}
     else if(currentPage==='detail')renderDetail();
   }catch(error){
     const message='서버 연결 실패 · 상태를 불러오지 못했어요. 잠시 후 재시도합니다.';
     $('server-status').textContent=message;$('public-server-status').textContent=message;
     if(currentPage==='detail'){adminDetailView=false;navigate(mode==='public'?'public-start':'home');}
     demo=[];render();showToast(error.message);
-  }finally{refreshBusy=false}
+  }finally{refreshBusy=false;refreshState.release?.();pendingRefresh=null;}
 }
 document.querySelectorAll('input[name="mode"]').forEach(input=>input.addEventListener('change',()=>{
   document.querySelectorAll('.setting-card').forEach(el=>el.classList.toggle('selected',el.id===input.value+'-choice'));
