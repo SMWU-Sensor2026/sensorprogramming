@@ -73,7 +73,7 @@ export function useCabinet() {
     setFeedback("");
     setPage(target);
     latest.current.page = target;
-    window.scrollTo({ top: 0, behavior: "instant" });
+    window.scrollTo({ left: 0, top: 0, behavior: "instant" });
   }
   async function refreshState(initial = false) {
     if (refreshing.current) {
@@ -91,6 +91,7 @@ export function useCabinet() {
         try {
           states = await api("/admin/compartments", { token: s.adminToken });
         } catch (error) {
+          if (epoch !== generation.current || !mounted.current) return;
           if (![401, 403].includes(error.status)) throw error;
           setAdminToken(null);
           latest.current.adminToken = null;
@@ -98,6 +99,7 @@ export function useCabinet() {
           setPage(nextMode === "public" ? "public-start" : "home");
         }
       }
+      if (epoch !== generation.current || !mounted.current) return;
       s = latest.current;
       if (nextMode === "public" && s.access) {
         try {
@@ -297,14 +299,32 @@ export function useCabinet() {
   }
   async function logoutAdmin() {
     await perform(async () => {
-      await api("/admin/logout", { method: "POST", token: adminToken });
+      const token = latest.current.adminToken;
+      // Discard responses that were started with administrator permissions.
+      generation.current++;
       setAdminToken(null);
       latest.current.adminToken = null;
       setAdminDetail(false);
+      latest.current.adminDetail = false;
+      setLoginOpen(false);
+      setLoginFeedback("");
       setHistory(null);
       setDryingHistory(null);
-      navigate(mode === "public" ? "public-start" : "home");
-      await refreshState();
+      setSlots([]);
+      const url = new URL(location.href);
+      url.searchParams.delete("admin");
+      if (url.pathname === "/admin") url.pathname = "/";
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      navigate(latest.current.mode === "public" ? "public-start" : "home");
+      showToast("관리자 화면에서 로그아웃했어요.");
+      try {
+        if (token) await api("/admin/logout", { method: "POST", token });
+      } catch (error) {
+        if (error.status !== 401)
+          showToast("이 화면에서는 로그아웃했어요. 서버 권한 해제는 연결 후 다시 확인해주세요.");
+      } finally {
+        await refreshState();
+      }
     });
   }
   async function saveMode(target = modeChoice, preview = false) {
